@@ -297,6 +297,87 @@ def test_ops():
     tf.reset_default_graph()
 
 
+def sample_tf(bs=1):
+    # add diffusion/scripts to PYTHONPATH, too
+    from scripts.run_cifar import Model as cifar10_model
+    from scripts.run_lsun import Model as lsun_model
+    from diffusion_tf.diffusion_utils_2 import get_beta_schedule
+    import PIL.Image
+
+    ckpts = {
+        "cifar10": "diffusion_models_release/diffusion_cifar10_model/model.ckpt-790000",
+        "lsun_bedroom": "diffusion_models_release/diffusion_lsun_bedroom_model/model.ckpt-2388000",
+        "lsun_cat": "diffusion_models_release/diffusion_lsun_cat_model/model.ckpt-1761000",
+        "lsun_church": "diffusion_models_release/diffusion_lsun_church_model/model.ckpt-4432000",
+    }
+    models = {
+        "cifar10": cifar10_model,
+        "lsun_bedroom": lsun_model,
+        "lsun_cat": lsun_model,
+        "lsun_church": lsun_model,
+    }
+    betas = get_beta_schedule(beta_schedule="linear", beta_start=0.0001,
+                              beta_end=0.02, num_diffusion_timesteps=1000)
+    cifar10_config = {
+        "model_name": "unet2d16b2",
+        "model_mean_type": "eps",
+        "model_var_type": "fixedlarge",
+        "betas": betas,
+        "loss_type": "noisepred",
+        "num_classes": 1,
+        "dropout": 0,
+        "randflip": 0,
+    }
+    lsun_config = {
+        "model_name": "unet2d16b2c112244",
+        "betas": betas,
+        "loss_type": "noisepred",
+        "num_classes": 1,
+        "dropout": 0,
+        "randflip": 0,
+        "block_size": 1,
+    }
+    model_configs = {
+        "cifar10": cifar10_config,
+        "lsun_bedroom": lsun_config,
+        "lsun_cat": lsun_config,
+        "lsun_church": lsun_config,
+    }
+    img_shapes = {
+        "cifar10": (32,32,3),
+        "lsun_bedroom": (256,256,3),
+        "lsun_cat": (256,256,3),
+        "lsun_church": (256,256,3),
+    }
+
+    for name in ["cifar10", "lsun_bedroom", "lsun_cat", "lsun_church"]:
+        with tf.Session() as sess:
+            print("Loading {} model".format(name))
+            model = models[name](**model_configs[name])
+            # build graph
+            x_ = tf.fill([bs, *img_shapes[name]], value=np.nan)
+            y = tf.fill([bs,], value=0)
+            sample = model.samples_fn(x_, y)
+            global_step = tf.train.get_or_create_global_step()
+            # load ckpt
+            ckpt = ckpts[name]
+            #print('initializing global variables')
+            #sess.run(tf.global_variables_initializer())
+            print('restoring')
+            saver = tf.train.Saver()
+            saver.restore(sess, ckpt)
+            global_step_val = sess.run(global_step)
+            print('restored global step: {}'.format(global_step_val))
+            # test sampling
+            result = sess.run(sample)
+            samples = result["samples"]
+            for i in range(samples.shape[0]):
+                sample = ((samples[i]+1.0)*127.5).astype(np.uint8)
+                PIL.Image.fromarray(sample).save("results/tf_{}_{:06}.png".format(name, i))
+        tf.reset_default_graph()
+
+
+
 def transplant(cfg, tf_ckpt, torch_ckpt):
     with tf.Session() as s:
         x = np.random.rand(1,cfg["resolution"],cfg["resolution"],cfg["in_channels"]).astype(np.float32)
