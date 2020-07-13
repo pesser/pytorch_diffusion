@@ -2,6 +2,7 @@ import numpy as np
 import torch
 
 from pytorch_diffusion.model import Model
+from pytorch_diffusion.ckpt_util import get_ckpt_path
 
 
 def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_timesteps):
@@ -173,14 +174,7 @@ class Diffusion(object):
         print("Instantiating")
         diffusion = cls(diffusion_config, model_config_map[name], device)
 
-        root = "diffusion_models_converted/"
-        ckpt_map = {
-            "cifar10": root+"diffusion_cifar10_model/model-790000.ckpt",
-            "lsun_bedroom": root+"diffusion_lsun_bedroom_model/model-2388000.ckpt",
-            "lsun_cat": root+"diffusion_lsun_cat_model/model-1761000.ckpt",
-            "lsun_church": root+"diffusion_lsun_church_model/model-4432000.ckpt",
-        }
-        ckpt = ckpt_map[name]
+        ckpt = get_ckpt_path(name)
         print("Loading checkpoint {}".format(ckpt))
         diffusion.model.load_state_dict(torch.load(ckpt, map_location=diffusion.device))
         diffusion.model.to(diffusion.device)
