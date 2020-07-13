@@ -8,8 +8,11 @@ class tqdm(object):
     tqdm-like progress bar for streamlit, adapted from
     https://github.com/streamlit/streamlit/issues/160#issuecomment-534385137
     """
-    def __init__(self, iterable, total=None):
-        self.prog_bar = st.progress(0)
+    def __init__(self, iterable, total=None, pbar=None):
+        if pbar is None:
+            pbar = st.empty()
+        self.prog_bar = pbar
+        self.prog_bar.progress(0)
         self.iterable = iterable
         self.length = total if total is not None else len(iterable)
         self.i = 0
@@ -45,6 +48,11 @@ def main():
                                       max_value=diffusion.num_timesteps,
                                       value=diffusion.num_timesteps)
 
+    pbar = st.sidebar.empty()
+    pbar.progress(0)
+    def tqdm_factory(*args, **kwargs):
+        return tqdm(*args, **kwargs, pbar=pbar)
+
     output = st.empty()
     step = st.empty()
 
@@ -58,7 +66,7 @@ def main():
         x = diffusion.denoise(1,
                               n_steps=n_steps, x=state["x"],
                               curr_step=state["curr_step"],
-                              progress_bar=tqdm,
+                              progress_bar=tqdm_factory,
                               callback=callback)
         state["x"] = x
         state["curr_step"] = max(0, state["curr_step"]-n_steps)
@@ -68,7 +76,7 @@ def main():
         x = diffusion.diffuse(1,
                               n_steps=n_steps, x=state["x"],
                               curr_step=state["curr_step"],
-                              progress_bar=tqdm,
+                              progress_bar=tqdm_factory,
                               callback=callback)
         state["x"] = x
         state["curr_step"] = min(diffusion.num_timesteps, state["curr_step"]+n_steps)
