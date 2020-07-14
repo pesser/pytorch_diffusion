@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+SRC=$(python -c "import os,inspect,pytorch_diffusion; print(os.path.dirname(inspect.getfile(pytorch_diffusion)))")
+streamlit run "${SRC}/demo.py"
