@@ -57,7 +57,8 @@ def denoising_step(x, t, *,
                    sqrt_recip_alphas_cumprod,
                    sqrt_recipm1_alphas_cumprod,
                    posterior_mean_coef1,
-                   posterior_mean_coef2):
+                   posterior_mean_coef2,
+                   return_pred_xstart=False):
     """
     Sample from p(x_{t-1} | x_t)
     """
@@ -81,7 +82,10 @@ def denoising_step(x, t, *,
     mask = 1-(t==0).float()
     mask = mask.reshape((x.shape[0],)+(1,)*(len(x.shape)-1))
     sample = mean + mask*torch.exp(0.5*logvar)*noise
-    return sample.float()
+    sample = sample.float()
+    if return_pred_xstart:
+        return sample, pred_xstart
+    return sample
 
 
 class Diffusion(object):
@@ -184,7 +188,8 @@ class Diffusion(object):
 
 
     def denoise(self, n, n_steps=None, x=None, curr_step=None,
-                progress_bar=lambda i, total=None: i, callback=lambda x, i: None):
+                progress_bar=lambda i, total=None: i,
+                callback=lambda x, i, x0=None: None):
         with torch.no_grad():
             if curr_step is None:
                 curr_step = self.num_timesteps
@@ -196,26 +201,29 @@ class Diffusion(object):
 
             if x is None:
                 assert curr_step == self.num_timesteps, curr_step
+                # start the chain with x_T from normal distribution
                 x = torch.randn(n, self.model.in_channels, self.model.resolution, self.model.resolution)
                 x = x.to(self.device)
 
             for i in progress_bar(reversed(range(curr_step-n_steps, curr_step)), total=n_steps):
                 t = (torch.ones(n)*i).to(self.device)
-                x = denoising_step(x,
-                                   t=t,
-                                   model=self.model,
-                                   logvar=self.logvar,
-                                   sqrt_recip_alphas_cumprod=self.sqrt_recip_alphas_cumprod,
-                                   sqrt_recipm1_alphas_cumprod=self.sqrt_recipm1_alphas_cumprod,
-                                   posterior_mean_coef1=self.posterior_mean_coef1,
-                                   posterior_mean_coef2=self.posterior_mean_coef2)
-                callback(x, i)
+                x, x0 = denoising_step(x,
+                                       t=t,
+                                       model=self.model,
+                                       logvar=self.logvar,
+                                       sqrt_recip_alphas_cumprod=self.sqrt_recip_alphas_cumprod,
+                                       sqrt_recipm1_alphas_cumprod=self.sqrt_recipm1_alphas_cumprod,
+                                       posterior_mean_coef1=self.posterior_mean_coef1,
+                                       posterior_mean_coef2=self.posterior_mean_coef2,
+                                       return_pred_xstart=True)
+                callback(x, i, x0=x0)
 
             return x
 
 
     def diffuse(self, n, n_steps=None, x=None, curr_step=None,
-                progress_bar=lambda i, total=None: i, callback=lambda x, i: None):
+                progress_bar=lambda i, total=None: i,
+                callback=lambda x, i: None):
         with torch.no_grad():
             if curr_step is None:
                 curr_step = 0
@@ -223,7 +231,7 @@ class Diffusion(object):
             assert curr_step < self.num_timesteps, curr_step
 
             if n_steps is None or curr_step+n_steps > self.num_timesteps:
-                n_steps = self.num_timesteps+curr_step
+                n_steps = self.num_timesteps-curr_step
 
             assert x is not None
 
@@ -233,7 +241,7 @@ class Diffusion(object):
                                    t=t,
                                    sqrt_alphas=self.sqrt_alphas,
                                    sqrt_one_minus_alphas=self.sqrt_one_minus_alphas)
-                callback(x, i)
+                callback(x, i+1)
 
             return x
 
@@ -249,19 +257,22 @@ class Diffusion(object):
         return x
 
     @staticmethod
-    def save(x, format_string):
+    def save(x, format_string, start_idx=0):
         import os, PIL.Image
         os.makedirs(os.path.split(format_string)[0], exist_ok=True)
-        x = torch2hwcuint8(x)
+        x = Diffusion.torch2hwcuint8(x)
         for i in range(x.shape[0]):
-            PIL.Image.fromarray(x[i]).save(format_string.format(i))
+            PIL.Image.fromarray(x[i]).save(format_string.format(start_idx+i))
 
 
 
 if __name__ == "__main__":
     import sys, tqdm
     name = sys.argv[1] if len(sys.argv)>1 else "cifar10"
-    n = int(sys.argv[2]) if len(sys.argv)>2 else 1
+    bs = int(sys.argv[2]) if len(sys.argv)>2 else 1
+    nb = int(sys.argv[3]) if len(sys.argv)>3 else 1
     diffusion = Diffusion.from_pretrained(name)
-    x = diffusion.denoise(n, progress_bar=tqdm.tqdm)
-    diffusion.save(x, "results/"+name+"_{:06}.png")
+    for ib in tqdm.tqdm(range(nb), desc="Batch"):
+        x = diffusion.denoise(bs, progress_bar=tqdm.tqdm)
+        idx = ib*bs
+        diffusion.save(x, "results/"+name+"/{:06}.png", start_idx=idx)

@@ -41,7 +41,8 @@ def main():
     diffusion = state["diffusion"]
     st.text("Running {} model on {}".format(name, diffusion.device))
 
-    clip = st.sidebar.checkbox("clip", value=True)
+    clip = st.sidebar.checkbox("clip outputs", value=True)
+    show_x0 = st.sidebar.checkbox("show predicted x0 during denoising", value=False)
 
     n_steps = st.sidebar.number_input("Number of steps",
                                       min_value=1,
@@ -56,7 +57,9 @@ def main():
     output = st.empty()
     step = st.empty()
 
-    def callback(x, i):
+    def callback(x, i, x0=None):
+        if show_x0 and x0 is not None:
+            x = x0
         output.image(diffusion.torch2hwcuint8(x, clip=clip)[0])
         step.text("Current step: {}".format(i))
     callback(state["x"], state["curr_step"])
