@@ -16,6 +16,8 @@ pytorch_diffusion_demo
 will start a [Streamlit](https://www.streamlit.io/) demo. It is recommended to
 run the demo with a GPU available.
 
+![demo](assets/demo.gif)
+
 
 ## Usage
 Diffusion models with pretrained weights for `cifar10`, `lsun-bedroom`,
