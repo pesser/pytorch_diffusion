@@ -351,6 +351,7 @@ def sample_tf(bs=1):
     }
 
     for name in ["cifar10", "lsun_bedroom", "lsun_cat", "lsun_church"]:
+        os.makedirs("results/tf_{}".format(name), exist_ok=True)
         with tf.Session() as sess:
             print("Loading {} model".format(name))
             model = models[name](**model_configs[name])
@@ -373,7 +374,7 @@ def sample_tf(bs=1):
             samples = result["samples"]
             for i in range(samples.shape[0]):
                 sample = ((samples[i]+1.0)*127.5).astype(np.uint8)
-                PIL.Image.fromarray(sample).save("results/tf_{}_{:06}.png".format(name, i))
+                PIL.Image.fromarray(sample).save("results/tf_{}/{:06}.png".format(name, i))
         tf.reset_default_graph()
 
 
