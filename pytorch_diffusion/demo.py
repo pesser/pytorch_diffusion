@@ -1,6 +1,7 @@
 import streamlit as st
 import time
 from pytorch_diffusion.diffusion import Diffusion
+from streamlit import caching
 
 
 class tqdm(object):
@@ -26,6 +27,7 @@ class tqdm(object):
 
 @st.cache(allow_output_mutation=True)
 def get_state(name):
+    caching.clear_cache()
     diffusion = Diffusion.from_pretrained(name)
     state = {"x": diffusion.denoise(1, n_steps=0),
              "curr_step": diffusion.num_timesteps,
