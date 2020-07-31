@@ -25,7 +25,9 @@ class tqdm(object):
             self.prog_bar.progress(current_prog)
 
 @st.cache(allow_output_mutation=True)
-def get_state(name):
+def get_state(name, ema):
+    if ema:
+        name = "ema_"+name
     diffusion = Diffusion.from_pretrained(name)
     state = {"x": diffusion.denoise(1, n_steps=0),
              "curr_step": diffusion.num_timesteps,
@@ -36,7 +38,8 @@ def main():
     st.title("Diffusion Model Demo")
 
     name = st.sidebar.radio("Model", ("cifar10", "lsun_bedroom", "lsun_cat", "lsun_church"))
-    state = get_state(name)
+    ema = st.sidebar.checkbox("ema", value=True)
+    state = get_state(name, ema=ema)
 
     diffusion = state["diffusion"]
     st.text("Running {} model on {}".format(name, diffusion.device))

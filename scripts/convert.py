@@ -37,6 +37,9 @@ except ImportError as e:
 
 
 def get_tf_var(scope, name):
+    if scope.startswith("ExponentialMovingAverage:0/"):
+        scope = scope[len("/ExponentialMovingAverage:0"):]
+        name = name+"/ExponentialMovingAverage"
     return tf.get_default_session().run(tf.get_default_graph().get_tensor_by_name(scope+"/"+name+":0"))
 
 
@@ -297,8 +300,11 @@ def test_ops():
     tf.reset_default_graph()
 
 
-def sample_tf(bs=1):
+def sample_tf(bs=1, nb=1, which=None):
+    import tqdm
     # add diffusion/scripts to PYTHONPATH, too
+    from diffusion_tf.tpu_utils.tpu_utils import make_ema
+    import diffusion_tf.utils as utils
     from scripts.run_cifar import Model as cifar10_model
     from scripts.run_lsun import Model as lsun_model
     from diffusion_tf.diffusion_utils_2 import get_beta_schedule
@@ -350,36 +356,53 @@ def sample_tf(bs=1):
         "lsun_church": (256,256,3),
     }
 
-    for name in ["cifar10", "lsun_bedroom", "lsun_cat", "lsun_church"]:
+    which = which if which is not None else ["cifar10", "lsun_bedroom", "lsun_cat", "lsun_church"]
+    if type(which) == str:
+        which = [which]
+
+    for name in which:
         os.makedirs("results/tf_{}".format(name), exist_ok=True)
+        print("Writing tf samples in {}".format("results/tf_{}".format(name)))
+        ema = name.startswith("ema_")
+        basename = name[len("ema_"):] if ema else name
         with tf.Session() as sess:
             print("Loading {} model".format(name))
-            model = models[name](**model_configs[name])
+            model = models[basename](**model_configs[basename])
             # build graph
-            x_ = tf.fill([bs, *img_shapes[name]], value=np.nan)
+            x_ = tf.fill([bs, *img_shapes[basename]], value=np.nan)
             y = tf.fill([bs,], value=0)
+
             sample = model.samples_fn(x_, y)
+
             global_step = tf.train.get_or_create_global_step()
+            if ema:
+                ema_, _ = make_ema(global_step=global_step,
+                                   ema_decay=1e-10,
+                                   trainable_variables=tf.trainable_variables())
+                with utils.ema_scope(ema_):
+                  print('===== EMA SAMPLES =====')
+                  sample = model.progressive_samples_fn(x_, y)
+
             # load ckpt
-            ckpt = ckpts[name]
-            #print('initializing global variables')
-            #sess.run(tf.global_variables_initializer())
+            ckpt = ckpts[basename]
             print('restoring')
             saver = tf.train.Saver()
             saver.restore(sess, ckpt)
             global_step_val = sess.run(global_step)
             print('restored global step: {}'.format(global_step_val))
-            # test sampling
-            result = sess.run(sample)
-            samples = result["samples"]
-            for i in range(samples.shape[0]):
-                sample = ((samples[i]+1.0)*127.5).astype(np.uint8)
-                PIL.Image.fromarray(sample).save("results/tf_{}/{:06}.png".format(name, i))
+            for ib in tqdm.tqdm(range(nb), desc="Batch"):
+                # test sampling
+                result = sess.run(sample)
+                samples = result["samples"]
+                for i in range(samples.shape[0]):
+                    np_sample = ((samples[i]+1.0)*127.5).astype(np.uint8)
+                    PIL.Image.fromarray(np_sample).save("results/tf_{}/{:06}.png".format(name,
+                                                                                         ib*bs+i))
         tf.reset_default_graph()
 
 
 
-def transplant(cfg, tf_ckpt, torch_ckpt):
+def transplant(cfg, tf_ckpt, torch_ckpt, ema=False):
     with tf.Session() as s:
         x = np.random.rand(1,cfg["resolution"],cfg["resolution"],cfg["in_channels"]).astype(np.float32)
         x = 2.0*x-1.0
@@ -408,22 +431,46 @@ def transplant(cfg, tf_ckpt, torch_ckpt):
         model_tf = lambda x, t: s.run(model_tf_op, feed_dict={xph: x, tsph: t})
 
         global_step = tf.train.get_or_create_global_step()
-
-        # restore tf ckpt
-        saver = tf.train.Saver()
-        saver.restore(s, tf_ckpt)
-        global_step_val = s.run(global_step)
-        print('restored global step: {}'.format(global_step_val))
-        print("copying into pytorch model")
-        copy_model(model, "model")
-        print("checking")
-        check(model, model_tf, x, t=ts)
-        print("saving torch weights in {}".format(torch_ckpt))
-        torch.save(model.state_dict(), torch_ckpt)
+        if ema:
+            from diffusion_tf.tpu_utils.tpu_utils import make_ema
+            import diffusion_tf.utils as utils
+            ema_, _ = make_ema(global_step=global_step,
+                               ema_decay=1e-10,
+                               trainable_variables=tf.trainable_variables())
+            scope = lambda: utils.ema_scope(ema_)
+        else:
+            import contextlib
+            scope = lambda: contextlib.nullcontext()
+        with scope():
+            if ema:
+                # redefine model op with ema variables
+                model_tf_op = model_tf_(xph, t=tsph, y=None, name="model", num_classes=1,
+                                        ch=cfg["ch"],
+                                        out_ch=cfg["out_ch"],
+                                        ch_mult=cfg["ch_mult"],
+                                        num_res_blocks=cfg["num_res_blocks"],
+                                        attn_resolutions=cfg["attn_resolutions"],
+                                        dropout=0.0)
+                model_tf = lambda x, t: s.run(model_tf_op, feed_dict={xph: x, tsph: t})
+            show_tfparams("model")
+            # restore tf ckpt
+            saver = tf.train.Saver()
+            saver.restore(s, tf_ckpt)
+            global_step_val = s.run(global_step)
+            print('restored global step: {}'.format(global_step_val))
+            print("copying into pytorch model")
+            tfscope = "model"
+            if ema:
+                tfscope = "ExponentialMovingAverage:0/"+tfscope
+            copy_model(model, tfscope)
+            print("checking")
+            check(model, model_tf, x, t=ts)
+            print("saving torch weights in {}".format(torch_ckpt))
+            torch.save(model.state_dict(), torch_ckpt)
     tf.reset_default_graph()
 
 
-def _transplant_model(name, step, cfg,
+def _transplant_model(name, step, cfg, ema=False,
                       tf_root="diffusion_models_release",
                       torch_root="diffusion_models_converted"):
     if not os.path.exists(tf_root):
@@ -431,13 +478,14 @@ def _transplant_model(name, step, cfg,
     tf_ckpt = os.path.join(tf_root,
                            "diffusion_{}_model/model.ckpt-{}".format(name,
                                                                      step))
-    torch_dir = os.path.join(torch_root, "diffusion_{}_model".format(name))
+    ema_prefix = "ema_" if ema else ""
+    torch_dir = os.path.join(torch_root, ema_prefix+"diffusion_{}_model".format(name))
     os.makedirs(torch_dir, exist_ok=True)
     torch_ckpt = os.path.join(torch_dir, "model-{}.ckpt".format(step))
-    transplant(cfg=cfg, tf_ckpt=tf_ckpt, torch_ckpt=torch_ckpt)
+    transplant(cfg=cfg, tf_ckpt=tf_ckpt, torch_ckpt=torch_ckpt, ema=ema)
 
 
-def transplant_cifar10():
+def transplant_cifar10(ema=False):
     cfg = {
         "resolution": 32,
         "in_channels": 3,
@@ -447,10 +495,10 @@ def transplant_cifar10():
         "num_res_blocks": 2,
         "attn_resolutions": (16,),
     }
-    _transplant_model(name="cifar10", step="790000", cfg=cfg)
+    _transplant_model(name="cifar10", step="790000", cfg=cfg, ema=ema)
 
 
-def transplant_lsun_bedroom():
+def transplant_lsun_bedroom(ema=False):
     cfg = {
         "resolution": 256,
         "in_channels": 3,
@@ -460,10 +508,10 @@ def transplant_lsun_bedroom():
         "num_res_blocks": 2,
         "attn_resolutions": (16,),
     }
-    _transplant_model(name="lsun_bedroom", step="2388000", cfg=cfg)
+    _transplant_model(name="lsun_bedroom", step="2388000", cfg=cfg, ema=ema)
 
 
-def transplant_lsun_cat():
+def transplant_lsun_cat(ema=False):
     cfg = {
         "resolution": 256,
         "in_channels": 3,
@@ -473,10 +521,10 @@ def transplant_lsun_cat():
         "num_res_blocks": 2,
         "attn_resolutions": (16,),
     }
-    _transplant_model(name="lsun_cat", step="1761000", cfg=cfg)
+    _transplant_model(name="lsun_cat", step="1761000", cfg=cfg, ema=ema)
 
 
-def transplant_lsun_church():
+def transplant_lsun_church(ema=False):
     cfg = {
         "resolution": 256,
         "in_channels": 3,
@@ -486,4 +534,4 @@ def transplant_lsun_church():
         "num_res_blocks": 2,
         "attn_resolutions": (16,),
     }
-    _transplant_model(name="lsun_church", step="4432000", cfg=cfg)
+    _transplant_model(name="lsun_church", step="4432000", cfg=cfg, ema=ema)

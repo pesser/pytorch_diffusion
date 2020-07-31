@@ -31,8 +31,9 @@ samples = diffusion.denoise(4)
 diffusion.save(samples, "lsun_church_sample_{:02}.png")
 ```
 
-The U-Net model used for denoising is available via `diffusion.model` and can
-also be instantiated on its own:
+Prefix the name with `ema_` to load the averaged weights that produce better
+results. The U-Net model used for denoising is available via `diffusion.model`
+and can also be instantiated on its own:
 
 ```
 from pytorch_diffusion import Model
@@ -61,8 +62,44 @@ python pytorch_diffusion/diffusion.py <name> <bs> <nb>
 ```
 
 where `<name>` is one of `cifar10`, `lsun-bedroom`, `lsun_cat`, `lsun_church`,
-`<bs>` is the batch size and `<nb>` the number of batches. This will produce
-samples from the PyTorch models and save them to `results/<name>/`.
+or one of these names prefixed with `ema_`, `<bs>` is the batch size and `<nb>`
+the number of batches. This will produce samples from the PyTorch models and
+save them to `results/<name>/`.
+
+
+## Results
+
+Evaluating 50k samples with
+[torch-fidelity](https://github.com/toshas/torch-fidelity) gives
+
+
+| Dataset            | EMA | Framework  | Model            | FID      |
+|--------------------|-----|------------|------------------|----------|
+| CIFAR10 Train      | yes | PyTorch    | `cifar10`        | 12.13775 |
+|                    |     | TensorFlow | `tf_cifar10`     | 12.30003 |
+|                    | no  | PyTorch    | `ema_cifar10`    | 3.21213  |
+|                    |     | TensorFlow | `tf_ema_cifar10` | 3.245872 |
+| CIFAR10 Validation | yes | PyTorch    | `cifar10`        | 14.30163 |
+|                    |     | TensorFlow | `tf_cifar10`     | 14.44705 |
+|                    | no  | PyTorch    | `ema_cifar10`    | 5.274105 |
+|                    |     | TensorFlow | `tf_ema_cifar10` | 5.325035 |
+
+
+To reproduce, generate 50k samples from the converted PyTorch models provided
+in this repo with
+
+```
+`python pytorch_diffusion/diffusion.py <Model> 500 100`
+```
+
+and with
+
+```
+python -c "import convert as m; m.sample_tf(500, 100, which=['cifar10', 'ema_cifar10'])"
+```
+
+for the original TensorFlow models.
+
 
 
 ## Running conversions
@@ -122,9 +159,13 @@ pytorch checkpoints, run
 
 ```
 python -c "import convert as m; m.transplant_cifar10()"
+python -c "import convert as m; m.transplant_cifar10(ema=True)"
 python -c "import convert as m; m.transplant_lsun_bedroom()"
+python -c "import convert as m; m.transplant_lsun_bedroom(ema=True)"
 python -c "import convert as m; m.transplant_lsun_cat()"
+python -c "import convert as m; m.transplant_lsun_cat(ema=True)"
 python -c "import convert as m; m.transplant_lsun_church()"
+python -c "import convert as m; m.transplant_lsun_church(ema=True)"
 ```
 
 Pytorch checkpoints will be saved in
@@ -133,11 +174,19 @@ Pytorch checkpoints will be saved in
 diffusion_models_converted/
   diffusion_cifar10_model/
     model-790000.ckpt
+  ema_diffusion_cifar10_model/
+    model-790000.ckpt
   diffusion_lsun_bedroom_model/
+    model-2388000.ckpt
+  ema_diffusion_lsun_bedroom_model/
     model-2388000.ckpt
   diffusion_lsun_cat_model/
     model-1761000.ckpt
+  ema_diffusion_lsun_cat_model/
+    model-1761000.ckpt
   diffusion_lsun_church_model/
+    model-4432000.ckpt
+  ema_diffusion_lsun_church_model/
     model-4432000.ckpt
 ```
 
@@ -148,4 +197,5 @@ To produce `N` samples from each of the pretrained TensorFlow models, run
 python -c "import convert as m; m.sample_tf(N)"
 ```
 
-Samples will be saved in `results/`.
+Pass a list of model names as keyword argument `which` to specify which models
+to sample from. Samples will be saved in `results/`.

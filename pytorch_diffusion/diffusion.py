@@ -173,10 +173,12 @@ class Diffusion(object):
             "lsun_cat": "fixedsmall",
             "lsun_church": "fixedsmall",
         }
-        diffusion_config["model_var_type"] = model_var_type_map[name]
+        ema = name.startswith("ema_")
+        basename = name[len("ema_"):] if ema else name
+        diffusion_config["model_var_type"] = model_var_type_map[basename]
 
         print("Instantiating")
-        diffusion = cls(diffusion_config, model_config_map[name], device)
+        diffusion = cls(diffusion_config, model_config_map[basename], device)
 
         ckpt = get_ckpt_path(name)
         print("Loading checkpoint {}".format(ckpt))
