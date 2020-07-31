@@ -75,13 +75,13 @@ Evaluating 50k samples with
 
 | Dataset            | EMA | Framework  | Model            | FID      |
 |--------------------|-----|------------|------------------|----------|
-| CIFAR10 Train      | yes | PyTorch    | `cifar10`        | 12.13775 |
+| CIFAR10 Train      | no  | PyTorch    | `cifar10`        | 12.13775 |
 |                    |     | TensorFlow | `tf_cifar10`     | 12.30003 |
-|                    | no  | PyTorch    | `ema_cifar10`    | 3.21213  |
+|                    | yes | PyTorch    | `ema_cifar10`    | 3.21213  |
 |                    |     | TensorFlow | `tf_ema_cifar10` | 3.245872 |
-| CIFAR10 Validation | yes | PyTorch    | `cifar10`        | 14.30163 |
+| CIFAR10 Validation | no  | PyTorch    | `cifar10`        | 14.30163 |
 |                    |     | TensorFlow | `tf_cifar10`     | 14.44705 |
-|                    | no  | PyTorch    | `ema_cifar10`    | 5.274105 |
+|                    | yes | PyTorch    | `ema_cifar10`    | 5.274105 |
 |                    |     | TensorFlow | `tf_ema_cifar10` | 5.325035 |
 
 
